@@ -241,6 +241,38 @@ func (f *File) InsertRow(sheet string, row int) {
 	f.adjustHelper(sheet, -1, row, 1)
 }
 
+// CopyPasteRow provides function to copy and paste row. For
+// example, copy 3-rd row and paste into 5-th in Sheet1:
+//
+//    xlsx.CopyPasteRow("Sheet1", 3, 5)
+//
+func (f *File) CopyPasteRow(sheet string, copyRow int, pasteRow int) {
+	if copyRow < 0 || pasteRow < 0 {
+		return
+	}
+	xlsx := f.workSheetReader(sheet)
+	var copyRowIndex, pasteRowIndex = -1, -1
+
+	for i, r := range xlsx.SheetData.Row {
+		if copyRowIndex != -1 && pasteRowIndex != -1 { break }
+
+		if copyRowIndex == -1 && r.R == copyRow {
+			copyRowIndex = i
+		} else if pasteRowIndex == -1 && r.R == pasteRow {
+			pasteRowIndex = i
+		}
+	}
+	pasteRowString := strconv.Itoa(pasteRow)
+	lenRowNumber := len(pasteRowString)
+	var CArray []xlsxC
+
+	for _, c := range xlsx.SheetData.Row[copyRowIndex].C {
+		c.R = c.R[:len(c.R) - lenRowNumber] + pasteRowString
+		CArray = append(CArray, c)
+	}
+	xlsx.SheetData.Row[pasteRowIndex].C = CArray
+}
+
 // checkRow provides function to check and fill each column element for all rows
 // and make that is continuous in a worksheet of XML. For example:
 //
