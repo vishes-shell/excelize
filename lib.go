@@ -3,7 +3,6 @@ package excelize
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/gob"
 	"io"
 	"log"
 	"math"
@@ -12,8 +11,8 @@ import (
 
 // ReadZipReader can be used to read an XLSX in memory without touching the
 // filesystem.
-func ReadZipReader(r *zip.Reader) (map[string]string, int, error) {
-	fileList := make(map[string]string)
+func ReadZipReader(r *zip.Reader) (map[string][]byte, int, error) {
+	fileList := make(map[string][]byte)
 	worksheets := 0
 	for _, v := range r.File {
 		fileList[v.Name] = readFile(v)
@@ -27,29 +26,32 @@ func ReadZipReader(r *zip.Reader) (map[string]string, int, error) {
 }
 
 // readXML provides function to read XML content as string.
-func (f *File) readXML(name string) string {
+func (f *File) readXML(name string) []byte {
 	if content, ok := f.XLSX[name]; ok {
 		return content
 	}
-	return ""
+	return []byte{}
 }
 
 // saveFileList provides function to update given file content in file list of
 // XLSX.
-func (f *File) saveFileList(name, content string) {
-	f.XLSX[name] = XMLHeader + content
+func (f *File) saveFileList(name string, content []byte) {
+	newContent := make([]byte, 0, len(XMLHeader)+len(content))
+	newContent = append(newContent, []byte(XMLHeader)...)
+	newContent = append(newContent, content...)
+	f.XLSX[name] = newContent
 }
 
 // Read file content as string in a archive file.
-func readFile(file *zip.File) string {
+func readFile(file *zip.File) []byte {
 	rc, err := file.Open()
 	if err != nil {
 		log.Fatal(err)
 	}
 	buff := bytes.NewBuffer(nil)
-	io.Copy(buff, rc)
+	_, _ = io.Copy(buff, rc)
 	rc.Close()
-	return string(buff.Bytes())
+	return buff.Bytes()
 }
 
 // ToAlphaString provides function to convert integer to Excel sheet column
@@ -110,17 +112,6 @@ func intOnlyMapF(rune rune) rune {
 		return rune
 	}
 	return -1
-}
-
-// deepCopy provides method to creates a deep copy of whatever is passed to it
-// and returns the copy in an interface. The returned value will need to be
-// asserted to the correct type.
-func deepCopy(dst, src interface{}) error {
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(src); err != nil {
-		return err
-	}
-	return gob.NewDecoder(bytes.NewBuffer(buf.Bytes())).Decode(dst)
 }
 
 // boolPtr returns a pointer to a bool with the given value.

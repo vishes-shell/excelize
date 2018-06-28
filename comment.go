@@ -3,19 +3,20 @@ package excelize
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"strconv"
 	"strings"
 )
 
 // parseFormatCommentsSet provides function to parse the format settings of the
 // comment with default value.
-func parseFormatCommentsSet(formatSet string) *formatComment {
+func parseFormatCommentsSet(formatSet string) (*formatComment, error) {
 	format := formatComment{
 		Author: "Author:",
 		Text:   " ",
 	}
-	json.Unmarshal([]byte(formatSet), &format)
-	return &format
+	err := json.Unmarshal([]byte(formatSet), &format)
+	return &format, err
 }
 
 // AddComment provides the method to add comment in a sheet by given worksheet
@@ -25,8 +26,11 @@ func parseFormatCommentsSet(formatSet string) *formatComment {
 //
 //    xlsx.AddComment("Sheet1", "A30", `{"author":"Excelize: ","text":"This is a comment."}`)
 //
-func (f *File) AddComment(sheet, cell, format string) {
-	formatSet := parseFormatCommentsSet(format)
+func (f *File) AddComment(sheet, cell, format string) error {
+	formatSet, err := parseFormatCommentsSet(format)
+	if err != nil {
+		return err
+	}
 	// Read sheet data.
 	xlsx := f.workSheetReader(sheet)
 	commentID := f.countComments() + 1
@@ -46,13 +50,23 @@ func (f *File) AddComment(sheet, cell, format string) {
 	}
 	commentsXML := "xl/comments" + strconv.Itoa(commentID) + ".xml"
 	f.addComment(commentsXML, cell, formatSet)
-	f.addDrawingVML(commentID, drawingVML, cell)
+	var colCount int
+	for i, l := range strings.Split(formatSet.Text, "\n") {
+		if ll := len(l); ll > colCount {
+			if i == 0 {
+				ll += len(formatSet.Author)
+			}
+			colCount = ll
+		}
+	}
+	f.addDrawingVML(commentID, drawingVML, cell, strings.Count(formatSet.Text, "\n")+1, colCount)
 	f.addContentTypePart(commentID, "comments")
+	return err
 }
 
 // addDrawingVML provides function to create comment as
 // xl/drawings/vmlDrawing%d.vml by given commit ID and cell.
-func (f *File) addDrawingVML(commentID int, drawingVML, cell string) {
+func (f *File) addDrawingVML(commentID int, drawingVML, cell string, lineCount, colCount int) {
 	col := string(strings.Map(letterOnlyMapF, cell))
 	row, _ := strconv.Atoi(strings.Map(intOnlyMapF, cell))
 	xAxis := row - 1
@@ -79,7 +93,7 @@ func (f *File) addDrawingVML(commentID int, drawingVML, cell string) {
 			},
 			VPath: &vPath{
 				Gradientshapeok: "t",
-				Connecttype:     "rect",
+				Connecttype:     "miter",
 			},
 		},
 	}
@@ -109,10 +123,12 @@ func (f *File) addDrawingVML(commentID int, drawingVML, cell string) {
 		},
 		ClientData: &xClientData{
 			ObjectType: "Note",
-			Anchor:     "3, 15, 8, 6, 4, 54, 13, 2",
-			AutoFill:   "False",
-			Row:        xAxis,
-			Column:     yAxis,
+			Anchor: fmt.Sprintf(
+				"%d, 23, %d, 0, %d, %d, %d, 5",
+				1+yAxis, 1+xAxis, 2+yAxis+lineCount, colCount+yAxis, 2+xAxis+lineCount),
+			AutoFill: "True",
+			Row:      xAxis,
+			Column:   yAxis,
 		},
 	}
 	s, _ := xml.Marshal(sp)
@@ -127,7 +143,7 @@ func (f *File) addDrawingVML(commentID int, drawingVML, cell string) {
 	c, ok := f.XLSX[drawingVML]
 	if ok {
 		d := decodeVmlDrawing{}
-		xml.Unmarshal([]byte(c), &d)
+		_ = xml.Unmarshal([]byte(c), &d)
 		for _, v := range d.Shape {
 			s := xlsxShape{
 				ID:          "_x0000_s1025",
@@ -142,7 +158,7 @@ func (f *File) addDrawingVML(commentID int, drawingVML, cell string) {
 	}
 	vml.Shape = append(vml.Shape, shape)
 	v, _ := xml.Marshal(vml)
-	f.XLSX[drawingVML] = string(v)
+	f.XLSX[drawingVML] = v
 }
 
 // addComment provides function to create chart as xl/comments%d.xml by given
@@ -197,12 +213,12 @@ func (f *File) addComment(commentsXML, cell string, formatSet *formatComment) {
 	c, ok := f.XLSX[commentsXML]
 	if ok {
 		d := xlsxComments{}
-		xml.Unmarshal([]byte(c), &d)
+		_ = xml.Unmarshal([]byte(c), &d)
 		comments.CommentList.Comment = append(comments.CommentList.Comment, d.CommentList.Comment...)
 	}
 	comments.CommentList.Comment = append(comments.CommentList.Comment, cmt)
 	v, _ := xml.Marshal(comments)
-	f.saveFileList(commentsXML, string(v))
+	f.saveFileList(commentsXML, v)
 }
 
 // countComments provides function to get comments files count storage in the

@@ -3,9 +3,21 @@ package excelize
 import (
 	"encoding/xml"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	// STCellFormulaTypeArray defined the formula is an array formula.
+	STCellFormulaTypeArray = "array"
+	// STCellFormulaTypeDataTable defined the formula is a data table formula.
+	STCellFormulaTypeDataTable = "dataTable"
+	// STCellFormulaTypeNormal defined the formula is a regular cell formula.
+	STCellFormulaTypeNormal = "normal"
+	// STCellFormulaTypeShared defined the formula is part of a shared formula.
+	STCellFormulaTypeShared = "shared"
 )
 
 // mergeCellsParser provides function to check merged cells in worksheet by
@@ -223,10 +235,41 @@ func (f *File) GetCellFormula(sheet, axis string) string {
 		if xlsx.SheetData.Row[k].R == row {
 			for i := range xlsx.SheetData.Row[k].C {
 				if axis == xlsx.SheetData.Row[k].C[i].R {
+					if xlsx.SheetData.Row[k].C[i].F.T == STCellFormulaTypeShared {
+						return getSharedForumula(xlsx, xlsx.SheetData.Row[k].C[i].F.Si)
+					}
 					if xlsx.SheetData.Row[k].C[i].F != nil {
 						return xlsx.SheetData.Row[k].C[i].F.Content
 					}
 				}
+			}
+		}
+	}
+	return ""
+}
+
+// getSharedForumula find a cell contains the same formula as another cell,
+// the "shared" value can be used for the t attribute and the si attribute can
+// be used to refer to the cell containing the formula. Two formulas are
+// considered to be the same when their respective representations in
+// R1C1-reference notation, are the same.
+//
+// Note that this function not validate ref tag to check the cell if or not in
+// allow area, and always return origin shared formula.
+func getSharedForumula(xlsx *xlsxWorksheet, si string) string {
+	for k := range xlsx.SheetData.Row {
+		for i := range xlsx.SheetData.Row[k].C {
+			if xlsx.SheetData.Row[k].C[i].F == nil {
+				continue
+			}
+			if xlsx.SheetData.Row[k].C[i].F.T != STCellFormulaTypeShared {
+				continue
+			}
+			if xlsx.SheetData.Row[k].C[i].F.Si != si {
+				continue
+			}
+			if xlsx.SheetData.Row[k].C[i].F.Ref != "" {
+				return xlsx.SheetData.Row[k].C[i].F.Content
 			}
 		}
 	}
@@ -483,6 +526,47 @@ func (f *File) SetCellDefault(sheet, axis, value string) {
 	xlsx.SheetData.Row[xAxis].C[yAxis].V = value
 }
 
+// SetSheetRow writes an array to row by given worksheet name, starting
+// coordinate and a pointer to array type 'slice'. For example, writes an
+// array to row 6 start with the cell B6 on Sheet1:
+//
+//     xlsx.SetSheetRow("Sheet1", "B6", &[]interface{}{"1", nil, 2})
+//
+func (f *File) SetSheetRow(sheet, axis string, slice interface{}) {
+	xlsx := f.workSheetReader(sheet)
+	axis = f.mergeCellsParser(xlsx, axis)
+	col := string(strings.Map(letterOnlyMapF, axis))
+	row, err := strconv.Atoi(strings.Map(intOnlyMapF, axis))
+	if err != nil {
+		return
+	}
+	// Make sure 'slice' is a Ptr to Slice
+	v := reflect.ValueOf(slice)
+	if v.Kind() != reflect.Ptr {
+		return
+	}
+	v = v.Elem()
+	if v.Kind() != reflect.Slice {
+		return
+	}
+
+	xAxis := row - 1
+	yAxis := TitleToNumber(col)
+
+	rows := xAxis + 1
+	cell := yAxis + 1
+
+	completeRow(xlsx, rows, cell)
+	completeCol(xlsx, rows, cell)
+
+	idx := 0
+	for i := cell - 1; i < v.Len()+cell-1; i++ {
+		c := ToAlphaString(i) + strconv.Itoa(row)
+		f.SetCellValue(sheet, c, v.Index(idx).Interface())
+		idx++
+	}
+}
+
 // checkCellInArea provides function to determine if a given coordinate is
 // within an area.
 func checkCellInArea(cell, area string) bool {
@@ -490,6 +574,10 @@ func checkCellInArea(cell, area string) bool {
 	area = strings.ToUpper(area)
 
 	ref := strings.Split(area, ":")
+	if len(ref) < 2 {
+		return false
+	}
+
 	from := ref[0]
 	to := ref[1]
 
