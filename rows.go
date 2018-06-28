@@ -263,11 +263,11 @@ func (f *File) CopyPasteRow(sheet string, copyRow int, pasteRow int) {
 		}
 	}
 	pasteRowString := strconv.Itoa(pasteRow)
-	lenRowNumber := len(pasteRowString)
+	copyRowLen := len(strconv.Itoa(copyRow))
 	var CArray []xlsxC
 
 	for _, c := range xlsx.SheetData.Row[copyRowIndex].C {
-		c.R = c.R[:len(c.R) - lenRowNumber] + pasteRowString
+		c.R = c.R[:len(c.R) - copyRowLen] + pasteRowString
 		CArray = append(CArray, c)
 	}
 	xlsx.SheetData.Row[pasteRowIndex].C = CArray
